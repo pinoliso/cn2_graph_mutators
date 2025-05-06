@@ -26,9 +26,9 @@ import java.sql.ResultSet;
 
 public class GraphQLFunction {
 
-    public static final String GRAPHQL_PATH = "/roles";
+    public static final String GRAPHQL_PATH = "/users";
 
-    private static final List<Rol> rolList = new ArrayList<>();
+    private static final List<User> userList = new ArrayList<>();
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final GraphQL graphQL;
     private static final String dbUser = System.getenv("DB_USER");
@@ -38,91 +38,48 @@ public class GraphQLFunction {
 
     static {
         // Definir esquema GraphQL
-        GraphQLObjectType rolType = GraphQLObjectType.newObject()
-            .name("Rol")
+        GraphQLObjectType userType = GraphQLObjectType.newObject()
+            .name("User")
             .field(f -> f.name("id").type(Scalars.GraphQLInt))
+            .field(f -> f.name("username").type(Scalars.GraphQLString))
+            .field(f -> f.name("password").type(Scalars.GraphQLString))
             .field(f -> f.name("name").type(Scalars.GraphQLString))
+            .field(f -> f.name("rol").type(Scalars.GraphQLString))
             .build();
 
         // Query
         GraphQLObjectType queryType = GraphQLObjectType.newObject()
             .name("Query")
-            .field(f -> f.name("getRolById")
-                .type(rolType)
+            .field(f -> f.name("getUserById")
+                .type(userType)
                 .argument(a -> a.name("id").type(Scalars.GraphQLInt))
                 .dataFetcher(env -> {
                     Integer id = env.getArgument("id");
                     try {
-                        return getRowById(id);
+                        return getUserById(id);
                     } catch (Exception e) {
-                        throw new RuntimeException("Error al obtener rol por id: " + e.getMessage());
+                        throw new RuntimeException("Error al obtener usuario por id: " + e.getMessage());
                     }
                 }))
-            .field(f -> f.name("getAllRoles")
-                .type(GraphQLList.list(rolType))
+            .field(f -> f.name("getAllUsers")
+                .type(GraphQLList.list(userType))
                 .dataFetcher(env -> {
                     try {
-                        return getAllRoles();
+                        return getAllUsers();
                     } catch (Exception e) {
-                        throw new RuntimeException("Error al obtener todos los roles: " + e.getMessage());
-                    }
-                }))
-            .build();
-
-        // Mutation
-        GraphQLObjectType mutationType = GraphQLObjectType.newObject()
-            .name("Mutation")
-            .field(f -> f.name("createRol")
-                .type(rolType)
-                .argument(a -> a.name("id").type(Scalars.GraphQLInt))
-                .argument(a -> a.name("name").type(Scalars.GraphQLString))
-                .dataFetcher(env -> {
-                    Rol rol = new Rol(
-                        env.getArgument("id"),
-                        env.getArgument("name"));
-                    try {
-                        createRow(rol);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Error al crear rol: " + e.getMessage());
-                    }
-                    return rol;
-                }))
-            .field(f -> f.name("updateRol")
-                .type(rolType)
-                .argument(a -> a.name("id").type(Scalars.GraphQLInt))
-                .argument(a -> a.name("name").type(Scalars.GraphQLString))
-                .dataFetcher(env -> {
-                    Integer id = env.getArgument("id");
-                    String name = env.getArgument("name");
-                    try {
-                        return updateRow(id, name);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Error al actualizar rol: " + e.getMessage());
-                    }
-                }))
-            .field(f -> f.name("deleteRol")
-                .type(Scalars.GraphQLBoolean)
-                .argument(a -> a.name("id").type(Scalars.GraphQLInt))
-                .dataFetcher(env -> {
-                    Integer id = env.getArgument("id");
-                    try {
-                        deleteRow(id);
-                        return true;
-                    } catch (Exception e) {
-                        throw new RuntimeException("Error al eliminar rol: " + e.getMessage());
+                        throw new RuntimeException("Error al obtener todos los usuarios: " + e.getMessage());
                     }
                 }))
             .build();
 
         GraphQLSchema schema = GraphQLSchema.newSchema()
             .query(queryType)
-            .mutation(mutationType)
             .build();
 
         graphQL = GraphQL.newGraphQL(schema).build();
     }
 
-    @FunctionName("roles")
+    @FunctionName("users")
     public HttpResponseMessage graphqlHandler(
         @HttpTrigger(name = "req", methods = {HttpMethod.POST}, authLevel = AuthorizationLevel.ANONYMOUS) 
         HttpRequestMessage<String> request, ExecutionContext context) {
@@ -152,7 +109,7 @@ public class GraphQLFunction {
         }
     }
 
-    private static Rol getRowById(Integer id) throws Exception {
+    private static User getUserById(Integer id) throws Exception {
         String jdbcUrl = "jdbc:oracle:thin:@" + dbAlias + "?TNS_ADMIN=" + walletPath;
 
         Properties props = new Properties();
@@ -161,11 +118,11 @@ public class GraphQLFunction {
         props.put("oracle.net.ssl_server_dn_match", "true");
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl, props)) {
-            try (PreparedStatement stmt = conn.prepareStatement("SELECT id, name FROM rols WHERE id = ?")) {
+            try (PreparedStatement stmt = conn.prepareStatement("SELECT id, username, password, name, rol FROM users WHERE id = ?")) {
                 stmt.setLong(1, id);
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
-                        return new Rol(rs.getInt("id"), rs.getString("name"));
+                        return new User(rs.getLong("id"), rs.getString("username"), rs.getString("password"), rs.getString("name"), rs.getString("rol"));
                     }
                 }
             }
@@ -173,7 +130,7 @@ public class GraphQLFunction {
         return null;
     }
 
-    private static List<Rol> getAllRoles() throws Exception {
+    private static List<User> getAllUsers() throws Exception {
         String jdbcUrl = "jdbc:oracle:thin:@" + dbAlias + "?TNS_ADMIN=" + walletPath;
 
         Properties props = new Properties();
@@ -181,76 +138,23 @@ public class GraphQLFunction {
         props.put("password", dbPass);
         props.put("oracle.net.ssl_server_dn_match", "true");
 
-        List<Rol> roles = new ArrayList<>();
+        List<User> users = new ArrayList<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl, props)) {
-            try (PreparedStatement stmt = conn.prepareStatement("SELECT id, name FROM rols")) {
+            try (PreparedStatement stmt = conn.prepareStatement("SELECT id, username, password, name, rol FROM users")) {
                 try (ResultSet rs = stmt.executeQuery()) {
-                    System.out.println("entro al executeQuery" );
                     while (rs.next()) {
-                        System.out.println("entro al next" );
-                        roles.add(new Rol(rs.getInt("id"), rs.getString("name")));
+                        users.add(new User(rs.getLong("id"), rs.getString("username"), rs.getString("password"), rs.getString("name"), rs.getString("rol")));
                     }
                 } catch(Exception e) {
-                    System.out.println("Roles: " + e.getMessage());
+                    System.out.println("Users: " + e.getMessage());
                 }
             } catch(Exception e) {
-                System.out.println("Roles: " + e.getMessage());
+                System.out.println("Users: " + e.getMessage());
             }
         } catch(Exception e) {
-            System.out.println("Roles: " + e.getMessage());
+            System.out.println("Users: " + e.getMessage());
         }
-        return roles;
-    }
-
-    private static void createRow(Rol rol) throws Exception {
-        String jdbcUrl = "jdbc:oracle:thin:@" + dbAlias + "?TNS_ADMIN=" + walletPath;
-
-        Properties props = new Properties();
-        props.put("user", dbUser);
-        props.put("password", dbPass);
-        props.put("oracle.net.ssl_server_dn_match", "true");
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, props)) {
-            try (PreparedStatement stmt = conn.prepareStatement("INSERT INTO rols(id, name) VALUES (?, ?)")) {
-                stmt.setLong(1, rol.getId());
-                stmt.setString(2, rol.getName());
-                stmt.executeUpdate();
-            }
-        }
-    }
-
-    private static Rol updateRow(Integer id, String name) throws Exception {
-        String jdbcUrl = "jdbc:oracle:thin:@" + dbAlias + "?TNS_ADMIN=" + walletPath;
-
-        Properties props = new Properties();
-        props.put("user", dbUser);
-        props.put("password", dbPass);
-        props.put("oracle.net.ssl_server_dn_match", "true");
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, props)) {
-            try (PreparedStatement stmt = conn.prepareStatement("UPDATE rols SET name = ? WHERE id = ?")) {
-                stmt.setString(1, name);
-                stmt.setLong(2, id);
-                stmt.executeUpdate();
-            }
-        }
-        return getRowById(id);
-    }
-
-    private static void deleteRow(Integer id) throws Exception {
-        String jdbcUrl = "jdbc:oracle:thin:@" + dbAlias + "?TNS_ADMIN=" + walletPath;
-
-        Properties props = new Properties();
-        props.put("user", dbUser);
-        props.put("password", dbPass);
-        props.put("oracle.net.ssl_server_dn_match", "true");
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, props)) {
-            try (PreparedStatement stmt = conn.prepareStatement("DELETE FROM rols WHERE id = ?")) {
-                stmt.setLong(1, id);
-                stmt.executeUpdate();
-            }
-        }
+        return users;
     }
 }
